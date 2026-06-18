@@ -48,9 +48,9 @@ OVERLAY_TXT = (255, 255, 255)      # white for full-bleed
 OVERLAY_BG  = (40, 30, 60, 170)    # semi-transparent dark
 
 GOOGLE_FONTS = {
-    "cinzel": "https://github.com/google/fonts/raw/main/ofl/cinzel/static/Cinzel-Bold.ttf",
-    "cormorant": "https://github.com/google/fonts/raw/main/ofl/cormorantgaramond/CormorantGaramond-Regular.ttf",
-    "cormorant_italic": "https://github.com/google/fonts/raw/main/ofl/cormorantgaramond/CormorantGaramond-Italic.ttf",
+    "cinzel": "https://raw.githubusercontent.com/google/fonts/main/ofl/cinzel/Cinzel%5Bwght%5D.ttf",
+    "cormorant": "https://raw.githubusercontent.com/google/fonts/main/ofl/cormorantgaramond/CormorantGaramond%5Bwght%5D.ttf",
+    "cormorant_italic": "https://raw.githubusercontent.com/google/fonts/main/ofl/cormorantgaramond/CormorantGaramond-Italic%5Bwght%5D.ttf",
 }
 
 st.set_page_config(
@@ -219,11 +219,18 @@ def ensure_fonts() -> Dict[str, str]:
 FONT_PATHS = ensure_fonts()
 
 
-def load_font(kind: str, size: int) -> ImageFont.FreeTypeFont:
+def load_font(kind: str, size: int,
+              weight: Optional[int] = None) -> ImageFont.FreeTypeFont:
     path = FONT_PATHS.get(kind)
     if path and os.path.exists(path):
         try:
-            return ImageFont.truetype(path, size)
+            font = ImageFont.truetype(path, size)
+            if weight is not None:
+                try:
+                    font.set_variation_by_axes([weight])
+                except Exception:
+                    pass
+            return font
         except Exception:
             pass
     return ImageFont.load_default()
@@ -600,8 +607,8 @@ def compose_page(page_w_in: float, page_h_in: float, dpi: int,
     text_pad = int(w_px * 0.025)
 
     base_size = int(w_px * 0.024 * font_scale)
-    body_font = load_font("cormorant", base_size)
-    dropcap_font = load_font("cinzel", int(base_size * 3.4))
+    body_font = load_font("cormorant", base_size, weight=500)
+    dropcap_font = load_font("cinzel", int(base_size * 3.4), weight=800)
 
     settings = {
         "margin": margin,
