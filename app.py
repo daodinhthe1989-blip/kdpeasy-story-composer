@@ -48,9 +48,33 @@ OVERLAY_TXT = (255, 255, 255)      # white for full-bleed
 OVERLAY_BG  = (40, 30, 60, 170)    # semi-transparent dark
 
 GOOGLE_FONTS = {
-    "cinzel": "https://raw.githubusercontent.com/google/fonts/main/ofl/cinzel/Cinzel%5Bwght%5D.ttf",
-    "cormorant": "https://raw.githubusercontent.com/google/fonts/main/ofl/cormorantgaramond/CormorantGaramond%5Bwght%5D.ttf",
-    "cormorant_italic": "https://raw.githubusercontent.com/google/fonts/main/ofl/cormorantgaramond/CormorantGaramond-Italic%5Bwght%5D.ttf",
+    "cinzel":        "https://raw.githubusercontent.com/google/fonts/main/ofl/cinzel/Cinzel%5Bwght%5D.ttf",
+    "cormorant":     "https://raw.githubusercontent.com/google/fonts/main/ofl/cormorantgaramond/CormorantGaramond%5Bwght%5D.ttf",
+    "fredoka":       "https://raw.githubusercontent.com/google/fonts/main/ofl/fredoka/Fredoka%5Bwdth,wght%5D.ttf",
+    "quicksand":     "https://raw.githubusercontent.com/google/fonts/main/ofl/quicksand/Quicksand%5Bwght%5D.ttf",
+    "caveat":        "https://raw.githubusercontent.com/google/fonts/main/ofl/caveat/Caveat%5Bwght%5D.ttf",
+    "lora":          "https://raw.githubusercontent.com/google/fonts/main/ofl/lora/Lora%5Bwght%5D.ttf",
+    "bangers":       "https://raw.githubusercontent.com/google/fonts/main/ofl/bangers/Bangers-Regular.ttf",
+    "merriweather":  "https://raw.githubusercontent.com/google/fonts/main/ofl/merriweather/Merriweather%5Bopsz,wdth,wght%5D.ttf",
+}
+
+THEMES: Dict[str, Dict] = {
+    "Classic fairy tale (dragons, magic)": {
+        "drop_key": "cinzel",     "drop_weight": 800, "drop_size_mult": 3.4,
+        "body_key": "cormorant",  "body_weight": 500,
+    },
+    "Modern children's book (3–7 yrs)": {
+        "drop_key": "fredoka",    "drop_weight": 700, "drop_size_mult": 2.8,
+        "body_key": "quicksand",  "body_weight": 500,
+    },
+    "Whimsical handwritten (bedtime)": {
+        "drop_key": "caveat",     "drop_weight": 700, "drop_size_mult": 3.4,
+        "body_key": "lora",       "body_weight": 400,
+    },
+    "Bold adventure (action, quest)": {
+        "drop_key": "bangers",    "drop_weight": None, "drop_size_mult": 2.6,
+        "body_key": "merriweather","body_weight": 500,
+    },
 }
 
 st.set_page_config(
@@ -596,7 +620,9 @@ def compose_page(page_w_in: float, page_h_in: float, dpi: int,
                  layout: str, image_bytes: Optional[bytes],
                  text: str, frame_style: str,
                  use_dropcap: bool, font_scale: float,
-                 line_spacing: float) -> Image.Image:
+                 line_spacing: float,
+                 theme_name: str = "Classic fairy tale (dragons, magic)"
+                 ) -> Image.Image:
     w_px = int(round(page_w_in * dpi))
     h_px = int(round(page_h_in * dpi))
 
@@ -606,9 +632,12 @@ def compose_page(page_w_in: float, page_h_in: float, dpi: int,
     margin = int(w_px * 0.06)
     text_pad = int(w_px * 0.025)
 
+    t = THEMES.get(theme_name, list(THEMES.values())[0])
     base_size = int(w_px * 0.024 * font_scale)
-    body_font = load_font("cormorant", base_size, weight=500)
-    dropcap_font = load_font("cinzel", int(base_size * 3.4), weight=800)
+    body_font = load_font(t["body_key"], base_size, weight=t["body_weight"])
+    dropcap_font = load_font(t["drop_key"],
+                              int(base_size * t["drop_size_mult"]),
+                              weight=t["drop_weight"])
 
     settings = {
         "margin": margin,
@@ -642,10 +671,12 @@ def compose_page_cached(page_w_in: float, page_h_in: float, dpi: int,
                         layout: str, image_bytes: Optional[bytes],
                         text: str, frame_style: str,
                         use_dropcap: bool, font_scale: float,
-                        line_spacing: float, _v: int = 1) -> bytes:
+                        line_spacing: float,
+                        theme_name: str = "Classic fairy tale (dragons, magic)",
+                        _v: int = 2) -> bytes:
     img = compose_page(page_w_in, page_h_in, dpi, layout, image_bytes,
                        text, frame_style, use_dropcap, font_scale,
-                       line_spacing)
+                       line_spacing, theme_name)
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
@@ -706,8 +737,17 @@ with st.sidebar:
         }[s],
     )
 
-    use_dropcap = st.checkbox(
-        "Drop cap (big first letter)", value=True,
+    theme_name = st.selectbox(
+        "Font theme",
+        list(THEMES.keys()),
+        index=0,
+        help="Pairs a fancy drop-cap font with a readable body font.",
+    )
+    theme = THEMES[theme_name]
+
+    st.caption(
+        "💡 Drop cap is now set **per-page** below the layout picker — "
+        "by convention, only the first page of a story has one."
     )
 
     font_scale = st.slider("Font size scale", 0.7, 1.6, 1.0, 0.05)
@@ -735,9 +775,16 @@ if "pages" not in st.session_state:
         "layout": "top",
         "image_bytes": None,
         "image_name": "",
+        "use_dropcap": True,   # first page defaults to having a drop cap
     }]
 if "active_page" not in st.session_state:
     st.session_state.active_page = 0
+
+
+# Migrate any older session entries that pre-date use_dropcap
+for _p in st.session_state.pages:
+    if "use_dropcap" not in _p:
+        _p["use_dropcap"] = False
 
 
 def add_page():
@@ -751,6 +798,7 @@ def add_page():
         "layout": last_layout,
         "image_bytes": None,
         "image_name": "",
+        "use_dropcap": False,   # new pages default to no drop cap
     })
     st.session_state.active_page = len(st.session_state.pages) - 1
 
@@ -847,6 +895,13 @@ with edit_col:
     )
     page["layout"] = LAYOUTS[layout_label]
 
+    page["use_dropcap"] = st.checkbox(
+        "✨ Drop cap on this page",
+        value=page.get("use_dropcap", False),
+        key=f"dropcap_{st.session_state.active_page}",
+        help="Only check this for chapter openings — never every page.",
+    )
+
     st.markdown("#### 🗂️ Page actions")
     a1, a2, a3, a4 = st.columns(4)
     with a1:
@@ -883,7 +938,9 @@ with preview_col:
         png = compose_page_cached(
             page_w_in, page_h_in, int(dpi), page["layout"],
             page["image_bytes"], page["text"], frame_style,
-            use_dropcap, float(font_scale), float(line_spacing),
+            page.get("use_dropcap", False),
+            float(font_scale), float(line_spacing),
+            theme_name,
         )
         preview_bytes = make_preview(png)
         st.markdown('<div class="preview-box">', unsafe_allow_html=True)
@@ -928,7 +985,9 @@ if do_export:
                 png = compose_page_cached(
                     page_w_in, page_h_in, int(dpi), p["layout"],
                     p["image_bytes"], p["text"], frame_style,
-                    use_dropcap, float(font_scale), float(line_spacing),
+                    p.get("use_dropcap", False),
+                    float(font_scale), float(line_spacing),
+                    theme_name,
                 )
                 zf.writestr(f"{slug}-page-{i+1:03d}.png", png)
                 progress.progress((i + 1) / N,
