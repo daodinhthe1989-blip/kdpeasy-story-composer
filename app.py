@@ -512,11 +512,15 @@ def render_layout_top(canvas: Image.Image, image: Optional[Image.Image],
     """Layout A — image top, text bottom."""
     w, h = canvas.size
     m = settings["margin"]
+    gl = settings.get("gutter_left_px", 0)
+    gr = settings.get("gutter_right_px", 0)
     text_pct = 0.32  # ~1/3 for text
 
-    img_box = (m, m, w - m, int(h * (1 - text_pct)) - m // 2)
-    txt_box = (m + settings["text_pad"], int(h * (1 - text_pct)) + m // 2,
-               w - m - settings["text_pad"], h - m - settings["text_pad"])
+    img_box = (m + gl, m, w - m - gr, int(h * (1 - text_pct)) - m // 2)
+    txt_box = (m + gl + settings["text_pad"],
+               int(h * (1 - text_pct)) + m // 2,
+               w - m - gr - settings["text_pad"],
+               h - m - settings["text_pad"])
 
     if image:
         bw = img_box[2] - img_box[0]
@@ -538,11 +542,13 @@ def render_layout_left(canvas: Image.Image, image: Optional[Image.Image],
     """Layout B — image left, text right."""
     w, h = canvas.size
     m = settings["margin"]
+    gl = settings.get("gutter_left_px", 0)
+    gr = settings.get("gutter_right_px", 0)
 
-    img_box = (m, m, int(w * 0.45), h - m)
+    img_box = (m + gl, m, int(w * 0.45), h - m)
     txt_box = (int(w * 0.45) + m // 2 + settings["text_pad"],
                m + settings["text_pad"],
-               w - m - settings["text_pad"],
+               w - m - gr - settings["text_pad"],
                h - m - settings["text_pad"])
 
     if image:
@@ -562,36 +568,55 @@ def render_layout_left(canvas: Image.Image, image: Optional[Image.Image],
 
 def render_layout_fullbleed(canvas: Image.Image, image: Optional[Image.Image],
                             text: str, settings: Dict):
-    """Layout C — full-bleed image with text overlay at bottom."""
-    w, h = canvas.size
+    """Layout C — full-bleed image with text overlay at bottom.
 
+    Canvas may include bleed; image fills the entire canvas (extending
+    into the bleed area). Text panel stays inside the trim area and
+    respects the gutter.
+    """
+    w, h = canvas.size
+    bleed = settings.get("bleed_px", 0)
+    m = settings["margin"]
+    gl = settings.get("gutter_left_px", 0)
+    gr = settings.get("gutter_right_px", 0)
+
+    # Image fills entire canvas (bleed included)
     if image:
         fitted = fit_image(image, w, h, "fill")
         paste_centered(canvas, fitted.convert("RGB"), (0, 0, w, h))
     else:
         ImageDraw.Draw(canvas).rectangle((0, 0, w, h), fill=SUBTLE_BG)
 
-    # Text overlay panel
+    # Trim bounds within the (possibly bleed-extended) canvas
+    trim_left   = bleed
+    trim_top    = bleed
+    trim_right  = w - bleed
+    trim_bottom = h - bleed
+
+    # Text overlay panel — always inside trim + respects gutter
     if text.strip():
         pad = settings["text_pad"]
         overlay_bg = settings.get("overlay_bg", OVERLAY_BG)
         overlay_txt = settings.get("overlay_txt", OVERLAY_TXT)
         overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         d = ImageDraw.Draw(overlay)
-        # measure text height first
         body_font = settings["body_font"]
         line_h = int(text_height(d, "Ag", body_font) * settings["line_spacing"])
-        tmp_lines = wrap_text(d, text, body_font, w - 4 * pad)
+
+        panel_left  = trim_left  + m + gl
+        panel_right = trim_right - m - gr
+        avail_w     = panel_right - panel_left - 2 * pad
+        tmp_lines = wrap_text(d, text, body_font, max(50, avail_w))
         block_h = line_h * (len(tmp_lines) + 1) + pad * 2
-        panel_top = h - block_h - settings["margin"]
-        d.rectangle([settings["margin"], panel_top,
-                     w - settings["margin"], h - settings["margin"]],
+        panel_top    = trim_bottom - block_h - m
+        panel_bottom = trim_bottom - m
+
+        d.rectangle([panel_left, panel_top, panel_right, panel_bottom],
                     fill=overlay_bg)
         canvas.paste(overlay, (0, 0), overlay)
 
-        txt_box = (settings["margin"] + pad, panel_top + pad,
-                   w - settings["margin"] - pad,
-                   h - settings["margin"] - pad)
+        txt_box = (panel_left + pad, panel_top + pad,
+                   panel_right - pad, panel_bottom - pad)
         draw_text_block(canvas, text, txt_box,
                         body_font, settings["dropcap_font"],
                         overlay_txt, settings["line_spacing"],
@@ -603,12 +628,15 @@ def render_layout_oval(canvas: Image.Image, image: Optional[Image.Image],
     """Layout D — oval image at top, text below."""
     w, h = canvas.size
     m = settings["margin"]
+    gl = settings.get("gutter_left_px", 0)
+    gr = settings.get("gutter_right_px", 0)
     text_pct = 0.32
 
     img_area_h = int(h * (1 - text_pct)) - m
-    oval_w = int(w * 0.78)
+    inner_w = w - gl - gr
+    oval_w = int(inner_w * 0.78)
     oval_h = int(img_area_h * 0.92)
-    oval_x = (w - oval_w) // 2
+    oval_x = gl + (inner_w - oval_w) // 2
     oval_y = m + (img_area_h - oval_h) // 2
 
     if image:
@@ -645,9 +673,9 @@ def render_layout_oval(canvas: Image.Image, image: Optional[Image.Image],
         cy = int(oval_y + oval_h / 2 + ry * math.sin(angle))
         draw_star(d, (cx, cy), max(6, int(w / 160)), STAR_COLOR)
 
-    txt_box = (m + settings["text_pad"],
+    txt_box = (m + gl + settings["text_pad"],
                oval_y + oval_h + m,
-               w - m - settings["text_pad"],
+               w - m - gr - settings["text_pad"],
                h - m - settings["text_pad"])
     draw_text_block(canvas, text, txt_box,
                     settings["body_font"], settings["dropcap_font"],
@@ -672,19 +700,34 @@ def compose_page(page_w_in: float, page_h_in: float, dpi: int,
                  use_dropcap: bool, font_scale: float,
                  line_spacing: float,
                  theme_name: str = "Classic fairy tale (dragons, magic)",
-                 overlay_style: str = "auto"
+                 overlay_style: str = "auto",
+                 bleed_in: float = 0.125,
+                 gutter_in: float = 0.375,
+                 page_number: int = 1,
+                 mirror_pages: bool = True
                  ) -> Image.Image:
-    w_px = int(round(page_w_in * dpi))
-    h_px = int(round(page_h_in * dpi))
+    trim_w_px = int(round(page_w_in * dpi))
+    trim_h_px = int(round(page_h_in * dpi))
+    bleed_px = max(0, int(round(bleed_in * dpi)))
+    gutter_px = max(0, int(round(gutter_in * dpi)))
 
-    canvas = Image.new("RGB", (w_px, h_px), SUBTLE_BG)
+    # Gutter side: odd pages bind on LEFT (so extra margin LEFT);
+    # even pages bind on RIGHT. If mirror is off, all pages get
+    # gutter on the LEFT (single-sided printing).
+    if mirror_pages:
+        is_odd = (page_number % 2 == 1)
+        gl = gutter_px if is_odd else 0
+        gr = 0 if is_odd else gutter_px
+    else:
+        gl = gutter_px
+        gr = 0
 
-    # Margins scale with page width
-    margin = int(w_px * 0.06)
-    text_pad = int(w_px * 0.025)
+    # Margins scale with page width (uses trim, not bleed)
+    margin = int(trim_w_px * 0.06)
+    text_pad = int(trim_w_px * 0.025)
 
     t = THEMES.get(theme_name, list(THEMES.values())[0])
-    base_size = int(w_px * 0.024 * font_scale)
+    base_size = int(trim_w_px * 0.024 * font_scale)
     body_font = load_font(t["body_key"], base_size, weight=t["body_weight"])
     dropcap_font = load_font(t["drop_key"],
                               int(base_size * t["drop_size_mult"]),
@@ -697,6 +740,9 @@ def compose_page(page_w_in: float, page_h_in: float, dpi: int,
         "dropcap_font": dropcap_font,
         "use_dropcap": use_dropcap,
         "line_spacing": line_spacing,
+        "gutter_left_px": gl,
+        "gutter_right_px": gr,
+        "bleed_px": bleed_px,
     }
 
     image = None
@@ -710,14 +756,34 @@ def compose_page(page_w_in: float, page_h_in: float, dpi: int,
     settings["overlay_bg"] = overlay_bg
     settings["overlay_txt"] = overlay_txt
 
+    final_w = trim_w_px + 2 * bleed_px
+    final_h = trim_h_px + 2 * bleed_px
+
+    if layout == "fullbleed":
+        # Render directly on the full canvas — image extends into bleed.
+        canvas = Image.new("RGB", (final_w, final_h), SUBTLE_BG)
+        render_layout_fullbleed(canvas, image, text, settings)
+        # No decorative frame for full-bleed by design.
+        return canvas
+
+    # Other layouts: render on a TRIM-sized canvas first.
+    trim_canvas = Image.new("RGB", (trim_w_px, trim_h_px), SUBTLE_BG)
     renderer = LAYOUT_RENDERERS.get(layout, render_layout_top)
-    renderer(canvas, image, text, settings)
+    # Pass settings with bleed_px=0 because trim_canvas has no bleed area.
+    trim_settings = dict(settings)
+    trim_settings["bleed_px"] = 0
+    renderer(trim_canvas, image, text, trim_settings)
 
-    if layout != "fullbleed":
-        draw_decorative_frame(canvas, frame_style,
-                              max(margin // 2, int(w_px * 0.025)),
-                              FRAME_COLOR)
+    draw_decorative_frame(trim_canvas, frame_style,
+                          max(margin // 2, int(trim_w_px * 0.025)),
+                          FRAME_COLOR)
 
+    if bleed_px <= 0:
+        return trim_canvas
+
+    # Wrap trim canvas inside a bleed canvas (cream background extends).
+    canvas = Image.new("RGB", (final_w, final_h), SUBTLE_BG)
+    canvas.paste(trim_canvas, (bleed_px, bleed_px))
     return canvas
 
 
@@ -729,10 +795,15 @@ def compose_page_cached(page_w_in: float, page_h_in: float, dpi: int,
                         line_spacing: float,
                         theme_name: str = "Classic fairy tale (dragons, magic)",
                         overlay_style: str = "auto",
-                        _v: int = 3) -> bytes:
+                        bleed_in: float = 0.125,
+                        gutter_in: float = 0.375,
+                        page_number: int = 1,
+                        mirror_pages: bool = True,
+                        _v: int = 4) -> bytes:
     img = compose_page(page_w_in, page_h_in, dpi, layout, image_bytes,
                        text, frame_style, use_dropcap, font_scale,
-                       line_spacing, theme_name, overlay_style)
+                       line_spacing, theme_name, overlay_style,
+                       bleed_in, gutter_in, page_number, mirror_pages)
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
@@ -808,6 +879,30 @@ with st.sidebar:
 
     font_scale = st.slider("Font size scale", 0.7, 1.6, 1.0, 0.05)
     line_spacing = st.slider("Line spacing", 1.1, 1.8, 1.35, 0.05)
+
+    st.markdown("### 📐 KDP print prep")
+    add_bleed = st.checkbox(
+        "Add KDP bleed (0.125\")",
+        value=True,
+        help="Extends the page by 0.125 inch on all sides. Required by "
+             "KDP for any page with edge-to-edge images so trimming "
+             "never leaves a white sliver.",
+    )
+    bleed_in = 0.125 if add_bleed else 0.0
+
+    gutter_in = st.number_input(
+        "Inside margin / gutter (inch)",
+        min_value=0.0, max_value=0.75, value=0.375, step=0.025,
+        help="Extra margin on the binding edge so text isn't swallowed "
+             "by the spine. KDP recommends 0.375\" for books up to "
+             "150 pages, 0.5\" for thicker books.",
+    )
+    mirror_pages = st.checkbox(
+        "Mirror gutter for odd/even pages",
+        value=True,
+        help="Odd pages bind on the LEFT, even on the RIGHT. Turn off "
+             "for single-sided printing.",
+    )
 
     st.markdown("---")
     book_title = st.text_input("Book title (used in filenames)",
@@ -1020,14 +1115,28 @@ with preview_col:
             float(font_scale), float(line_spacing),
             theme_name,
             page.get("overlay_style", "auto"),
+            float(bleed_in), float(gutter_in),
+            st.session_state.active_page + 1,
+            bool(mirror_pages),
         )
         preview_bytes = make_preview(png)
         st.markdown('<div class="preview-box">', unsafe_allow_html=True)
         st.image(preview_bytes, use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
+
+        out_w_in = page_w_in + 2 * bleed_in
+        out_h_in = page_h_in + 2 * bleed_in
+        out_w_px = int(out_w_in * dpi)
+        out_h_px = int(out_h_in * dpi)
+        bleed_note = (f"  (trim {page_w_in}\" × {page_h_in}\" + "
+                      f"{bleed_in}\" bleed each side)") if bleed_in > 0 else ""
+        gutter_note = (f"  •  Gutter {gutter_in}\" on "
+                       f"{'LEFT' if (not mirror_pages or (st.session_state.active_page + 1) % 2 == 1) else 'RIGHT'}"
+                       f" (page {st.session_state.active_page + 1})") if gutter_in > 0 else ""
         st.caption(
-            f"Output PNG: {int(page_w_in*dpi)} × {int(page_h_in*dpi)} px  •  "
-            f"{page_w_in}\" × {page_h_in}\" @ {dpi} DPI"
+            f"Output PNG: {out_w_px} × {out_h_px} px  •  "
+            f"{out_w_in:.3f}\" × {out_h_in:.3f}\" @ {dpi} DPI"
+            f"{bleed_note}{gutter_note}"
         )
     except Exception as e:
         st.error(f"Preview error: {e}")
@@ -1044,8 +1153,11 @@ with ex_col1:
     do_export = st.button(f"📦 Build {N}-page PNG ZIP",
                           use_container_width=True)
 with ex_col2:
+    out_w_px_total = int((page_w_in + 2 * bleed_in) * dpi)
+    out_h_px_total = int((page_h_in + 2 * bleed_in) * dpi)
     st.caption(
-        f"Output: **{N} PNGs** at {int(page_w_in*dpi)} × {int(page_h_in*dpi)} px"
+        f"Output: **{N} PNGs** at {out_w_px_total} × {out_h_px_total} px"
+        f"{' (includes bleed)' if bleed_in > 0 else ''}"
         f"  •  Next: upload these to **KDPEasy PDF Builder** to get the final PDF."
     )
 
@@ -1068,6 +1180,9 @@ if do_export:
                     float(font_scale), float(line_spacing),
                     theme_name,
                     p.get("overlay_style", "auto"),
+                    float(bleed_in), float(gutter_in),
+                    i + 1,
+                    bool(mirror_pages),
                 )
                 zf.writestr(f"{slug}-page-{i+1:03d}.png", png)
                 progress.progress((i + 1) / N,
