@@ -45,7 +45,15 @@ STAR_COLOR  = (245, 200, 80)       # soft gold
 TEXT_COLOR  = (45, 35, 70)         # dark indigo
 SUBTLE_BG   = (252, 248, 240)      # cream parchment
 OVERLAY_TXT = (255, 255, 255)      # white for full-bleed
-OVERLAY_BG  = (40, 30, 60, 170)    # semi-transparent dark
+OVERLAY_BG  = (40, 30, 60, 170)    # semi-transparent dark (legacy default)
+
+OVERLAY_STYLES = {
+    "Auto (match the scene)":    "auto",
+    "Cool dark (night, ocean)":  "cool",
+    "Warm dark (sunny, autumn)": "warm",
+    "Cream (light overlay)":     "cream",
+    "Forest (green dark)":       "forest",
+}
 
 GOOGLE_FONTS = {
     "cinzel":        "https://raw.githubusercontent.com/google/fonts/main/ofl/cinzel/Cinzel%5Bwght%5D.ttf",
@@ -266,6 +274,46 @@ def load_font(kind: str, size: int,
 def hex_to_rgb(hex_str: str) -> Tuple[int, int, int]:
     h = hex_str.lstrip("#")
     return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+
+
+def compute_overlay(image: Optional[Image.Image], style: str
+                    ) -> Tuple[Optional[Tuple[int, int, int, int]],
+                               Tuple[int, int, int]]:
+    """Return (overlay_rgba_or_None, text_rgb) for the Full-bleed layout."""
+    if style == "warm":
+        return (55, 28, 18, 175), (255, 245, 230)
+    if style == "cool":
+        return (40, 30, 60, 170), (255, 255, 255)
+    if style == "cream":
+        return (252, 246, 228, 225), (45, 35, 70)
+    if style == "forest":
+        return (20, 45, 30, 175), (230, 245, 220)
+
+    # "auto" — sample bottom 30% of the image, darken
+    if image is None:
+        return (40, 30, 60, 170), (255, 255, 255)
+    try:
+        img = image.convert("RGB")
+        w, h = img.size
+        crop = img.crop((0, int(h * 0.7), w, h))
+        thumb = crop.resize((40, 20))
+        pixels = list(thumb.getdata())
+        r = sum(p[0] for p in pixels) // len(pixels)
+        g = sum(p[1] for p in pixels) // len(pixels)
+        b = sum(p[2] for p in pixels) // len(pixels)
+        # Brightness of average colour (0..255)
+        brightness = (r * 299 + g * 587 + b * 114) // 1000
+        if brightness > 170:
+            # Bright scene → cream overlay + dark text
+            return (252, 246, 228, 220), (45, 35, 70)
+        # Otherwise darken the sampled colour for a tinted dark overlay
+        darken = 0.28
+        dr = max(10, int(r * darken))
+        dg = max(10, int(g * darken))
+        db = max(10, int(b * darken))
+        return (dr, dg, db, 178), (255, 250, 240)
+    except Exception:
+        return (40, 30, 60, 170), (255, 255, 255)
 
 
 def text_width(draw: ImageDraw.ImageDraw, text: str,
@@ -526,6 +574,8 @@ def render_layout_fullbleed(canvas: Image.Image, image: Optional[Image.Image],
     # Text overlay panel
     if text.strip():
         pad = settings["text_pad"]
+        overlay_bg = settings.get("overlay_bg", OVERLAY_BG)
+        overlay_txt = settings.get("overlay_txt", OVERLAY_TXT)
         overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         d = ImageDraw.Draw(overlay)
         # measure text height first
@@ -536,7 +586,7 @@ def render_layout_fullbleed(canvas: Image.Image, image: Optional[Image.Image],
         panel_top = h - block_h - settings["margin"]
         d.rectangle([settings["margin"], panel_top,
                      w - settings["margin"], h - settings["margin"]],
-                    fill=OVERLAY_BG)
+                    fill=overlay_bg)
         canvas.paste(overlay, (0, 0), overlay)
 
         txt_box = (settings["margin"] + pad, panel_top + pad,
@@ -544,7 +594,7 @@ def render_layout_fullbleed(canvas: Image.Image, image: Optional[Image.Image],
                    h - settings["margin"] - pad)
         draw_text_block(canvas, text, txt_box,
                         body_font, settings["dropcap_font"],
-                        OVERLAY_TXT, settings["line_spacing"],
+                        overlay_txt, settings["line_spacing"],
                         settings["use_dropcap"])
 
 
@@ -621,7 +671,8 @@ def compose_page(page_w_in: float, page_h_in: float, dpi: int,
                  text: str, frame_style: str,
                  use_dropcap: bool, font_scale: float,
                  line_spacing: float,
-                 theme_name: str = "Classic fairy tale (dragons, magic)"
+                 theme_name: str = "Classic fairy tale (dragons, magic)",
+                 overlay_style: str = "auto"
                  ) -> Image.Image:
     w_px = int(round(page_w_in * dpi))
     h_px = int(round(page_h_in * dpi))
@@ -655,6 +706,10 @@ def compose_page(page_w_in: float, page_h_in: float, dpi: int,
         except Exception:
             image = None
 
+    overlay_bg, overlay_txt = compute_overlay(image, overlay_style)
+    settings["overlay_bg"] = overlay_bg
+    settings["overlay_txt"] = overlay_txt
+
     renderer = LAYOUT_RENDERERS.get(layout, render_layout_top)
     renderer(canvas, image, text, settings)
 
@@ -673,10 +728,11 @@ def compose_page_cached(page_w_in: float, page_h_in: float, dpi: int,
                         use_dropcap: bool, font_scale: float,
                         line_spacing: float,
                         theme_name: str = "Classic fairy tale (dragons, magic)",
-                        _v: int = 2) -> bytes:
+                        overlay_style: str = "auto",
+                        _v: int = 3) -> bytes:
     img = compose_page(page_w_in, page_h_in, dpi, layout, image_bytes,
                        text, frame_style, use_dropcap, font_scale,
-                       line_spacing, theme_name)
+                       line_spacing, theme_name, overlay_style)
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
@@ -776,15 +832,18 @@ if "pages" not in st.session_state:
         "image_bytes": None,
         "image_name": "",
         "use_dropcap": True,   # first page defaults to having a drop cap
+        "overlay_style": "auto",
     }]
 if "active_page" not in st.session_state:
     st.session_state.active_page = 0
 
 
-# Migrate any older session entries that pre-date use_dropcap
+# Migrate any older session entries that pre-date new fields
 for _p in st.session_state.pages:
     if "use_dropcap" not in _p:
         _p["use_dropcap"] = False
+    if "overlay_style" not in _p:
+        _p["overlay_style"] = "auto"
 
 
 def add_page():
@@ -799,6 +858,7 @@ def add_page():
         "image_bytes": None,
         "image_name": "",
         "use_dropcap": False,   # new pages default to no drop cap
+        "overlay_style": "auto",
     })
     st.session_state.active_page = len(st.session_state.pages) - 1
 
@@ -902,6 +962,24 @@ with edit_col:
         help="Only check this for chapter openings — never every page.",
     )
 
+    # Overlay style is only meaningful for Full-bleed layout (C)
+    if page["layout"] == "fullbleed":
+        ovr_labels = list(OVERLAY_STYLES.keys())
+        ovr_values = list(OVERLAY_STYLES.values())
+        try:
+            ovr_idx = ovr_values.index(page.get("overlay_style", "auto"))
+        except ValueError:
+            ovr_idx = 0
+        ovr_label = st.selectbox(
+            "🎨 Text overlay tone",
+            ovr_labels,
+            index=ovr_idx,
+            key=f"overlay_{st.session_state.active_page}",
+            help="Tints the text panel to match the scene mood. "
+                 "Auto samples the image for you.",
+        )
+        page["overlay_style"] = OVERLAY_STYLES[ovr_label]
+
     st.markdown("#### 🗂️ Page actions")
     a1, a2, a3, a4 = st.columns(4)
     with a1:
@@ -941,6 +1019,7 @@ with preview_col:
             page.get("use_dropcap", False),
             float(font_scale), float(line_spacing),
             theme_name,
+            page.get("overlay_style", "auto"),
         )
         preview_bytes = make_preview(png)
         st.markdown('<div class="preview-box">', unsafe_allow_html=True)
@@ -988,6 +1067,7 @@ if do_export:
                     p.get("use_dropcap", False),
                     float(font_scale), float(line_spacing),
                     theme_name,
+                    p.get("overlay_style", "auto"),
                 )
                 zf.writestr(f"{slug}-page-{i+1:03d}.png", png)
                 progress.progress((i + 1) / N,
